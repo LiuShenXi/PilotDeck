@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PilotDeck PR #180 技术复盘：WebSocket 发送失败的 UI 可见化</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --paper: #ffffff;
+      --ink: #1f2937;
+      --muted: #667085;
+      --line: #d9dee8;
+      --accent: #1f6feb;
+      --accent-soft: #eaf2ff;
+      --good: #0f766e;
+      --warn: #b45309;
+      --bad: #b42318;
+      --code-bg: #101828;
+      --code-ink: #f2f4f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      width: min(1080px, calc(100% - 32px));
+      margin: 32px auto 56px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(16, 24, 40, 0.08);
+      overflow: hidden;
+    }
+
+    header {
+      padding: 40px 48px 32px;
+      background: linear-gradient(180deg, #ffffff 0%, #f3f7ff 100%);
+      border-bottom: 1px solid var(--line);
+    }
+
+    section {
+      padding: 30px 48px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child {
+      border-bottom: 0;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.25;
+      margin: 0 0 14px;
+    }
+
+    h1 {
+      font-size: 32px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 22px;
+      padding-top: 2px;
+    }
+
+    h3 {
+      font-size: 17px;
+      margin-top: 22px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      margin: 10px 0 0 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+      background: #eef2f7;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+
+    pre {
+      margin: 14px 0;
+      padding: 16px 18px;
+      overflow: auto;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      border-radius: 0;
+      font-size: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f8fafc;
+      font-weight: 700;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 999px;
+      padding: 6px 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .lead {
+      max-width: 860px;
+      color: #344054;
+      font-size: 17px;
+    }
+
+    .callout {
+      margin: 16px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 8px;
+    }
+
+    .callout.warn {
+      border-left-color: var(--warn);
+      background: #fff7ed;
+    }
+
+    .callout.good {
+      border-left-color: var(--good);
+      background: #ecfdf5;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      background: #fbfdff;
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 118px;
+    }
+
+    .step strong {
+      display: block;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+
+    .qa {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-top: 12px;
+      background: #fcfcfd;
+    }
+
+    .qa strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .tag-good {
+      color: var(--good);
+      font-weight: 700;
+    }
+
+    .tag-warn {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        width: calc(100% - 20px);
+        margin: 10px auto 28px;
+      }
+
+      header, section {
+        padding: 24px 20px;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .flow {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>PilotDeck PR #180 技术复盘：WebSocket 发送失败的 UI 可见化</h1>
+      <p class="lead">
+        这份文档用于复盘一次真实开源贡献：从本地排障中发现 PilotDeck 聊天界面在 WebSocket 未连接时只写 console，不给用户明确反馈，
+        到通过最小改动修复状态机误导，并提交 PR。
+      </p>
+      <div class="meta">
+        <span class="pill">项目：OpenBMB/PilotDeck</span>
+        <span class="pill">PR：#180</span>
+        <span class="pill">分支：fix/websocket-send-failed-feedback</span>
+        <span class="pill">提交：088fb24</span>
+        <span class="pill">日期：2026-06-08</span>
+      </div>
+    </header>
+
+    <section>
+      <h2>一句话总结</h2>
+      <div class="callout good">
+        当 PilotDeck WebSocket 尚未连接或已经断开时，用户点击发送后，旧实现只在控制台打印
+        <code>WebSocket not connected</code>，聊天 UI 却可能进入乐观的 Processing / Sending 状态。
+        PR #180 让底层发送函数返回发送结果，并让 composer 在发送失败时保留输入、停止 loading、显示可见错误消息。
+      </div>
+    </section>
+
+    <section>
+      <h2>背景与问题现象</h2>
+      <p>
+        这个问题来自本地调试 PilotDeck 模型调用链路时的实际体验。用户在聊天输入框发送消息后，界面可能显示正在发送或正在处理，
+        但中转服务没有收到任何模型请求。继续往下查后发现，问题并不总是 provider key、base URL 或模型名错误；
+        有时是浏览器到 UI server 的 WebSocket 链路本身没有建立成功。
+      </p>
+
+      <h3>用户看到的现象</h3>
+      <ul>
+        <li>点击发送后，输入框清空。</li>
+        <li>聊天界面出现乐观用户消息或 Processing 状态。</li>
+        <li>服务端 / 中转平台看不到模型请求。</li>
+        <li>浏览器控制台可能只有 <code>WebSocket not connected</code>。</li>
+      </ul>
+
+      <h3>问题的产品影响</h3>
+      <p>
+        这是典型的“状态反馈误导”：用户以为请求已经发出，实际上消息连本地 WebSocket 都没有成功发送。
+        这种问题会把排障方向带偏，让用户误查 API key、模型配置、路由、网关、代理等更复杂的部分。
+      </p>
+    </section>
+
+    <section>
+      <h2>关键代码链路</h2>
+      <p>这次修复涉及的是 UI 发送链路，不是模型 provider 调用链路。</p>
+
+      <div class="flow">
+        <div class="step">
+          <strong>1. 用户提交</strong>
+          <span><code>useChatComposerState</code> 处理输入框提交。</span>
+        </div>
+        <div class="step">
+          <strong>2. 构造命令</strong>
+          <span><code>startSessionCommand</code> 组装 <code>pilotdeck-command</code>。</span>
+        </div>
+        <div class="step">
+          <strong>3. WebSocket 发送</strong>
+          <span><code>WebSocketContext.sendMessage</code> 调用浏览器 <code>socket.send()</code>。</span>
+        </div>
+        <div class="step">
+          <strong>4. 旧行为</strong>
+          <span>未连接时只 <code>console.warn</code>，调用方不知道失败。</span>
+        </div>
+        <div class="step">
+          <strong>5. 新行为</strong>
+          <span>返回 <code>false</code>，composer 显示错误并保留输入。</span>
+        </div>
+      </div>
+
+      <h3>旧实现的核心问题</h3>
+      <pre><code>const sendMessage = useCallback((message: any) =&gt; {
+  const socket = wsRef.current;
+  if (socket &amp;&amp; socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(message));
+  } else {
+    console.warn('WebSocket not connected');
+  }
+}, []);</code></pre>
+
+      <p>
+        这段代码的问题不是没有检测 WebSocket 状态，而是检测结果没有进入业务状态机。
+        对调用方来说，<code>sendMessage</code> 的返回值永远是 <code>undefined</code>，
+        因此 composer 会继续执行乐观 UI 更新：添加用户消息、设置 loading、清空输入框。
+      </p>
+    </section>
+
+    <section>
+      <h2>根因分析</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>层级</th>
+            <th>发现</th>
+            <th>结论</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>模型 / provider</td>
+            <td>中转平台没有请求记录。</td>
+            <td>请求没有到达模型层。</td>
+          </tr>
+          <tr>
+            <td>UI WebSocket</td>
+            <td>发送函数在未连接时只打印 warning。</td>
+            <td>失败发生在浏览器到本地 UI server 的发送阶段。</td>
+          </tr>
+          <tr>
+            <td>Composer 状态机</td>
+            <td>发送前后没有检查发送结果，直接进入乐观状态。</td>
+            <td>UI 状态和真实发送状态脱节。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        面试时可以强调：这个 bug 的本质不是“WebSocket 会断开”，而是“发送失败没有被建模为业务结果”。
+        因此修复点不是简单加一个 toast，而是让底层 API 显式返回发送成败，再让上层状态机基于结果分支处理。
+      </div>
+    </section>
+
+    <section>
+      <h2>修复设计</h2>
+      <h3>目标</h3>
+      <ul>
+        <li>WebSocket 未连接时，用户能在聊天区域看到明确错误。</li>
+        <li>发送失败时不要清空输入，方便用户等待重连后重试。</li>
+        <li>发送失败时不要进入 Processing / Sending 状态。</li>
+        <li>保持改动范围小，不引入全局 toast 系统或大规模状态重构。</li>
+      </ul>
+
+      <h3>为什么选择返回布尔值</h3>
+      <p>
+        直接让 <code>sendMessage</code> 返回 <code>true</code> / <code>false</code> 是最小、最可测试的改法。
+        它不改变 WebSocket 的连接生命周期，也不要求所有调用方立即处理失败。旧调用方可以继续忽略返回值；
+        chat composer 作为用户发送入口，则可以选择处理失败并展示 UI。
+      </p>
+
+      <pre><code>const sendMessage = useCallback((message: any) =&gt; {
+  const socket = wsRef.current;
+  if (socket &amp;&amp; socket.readyState === WebSocket.OPEN) {
+    try {
+      socket.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.error('WebSocket send failed:', error);
+      return false;
+    }
+  }
+  console.warn('WebSocket not connected');
+  return false;
+}, []);</code></pre>
+    </section>
+
+    <section>
+      <h2>具体改动</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>文件</th>
+            <th>改动</th>
+            <th>作用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ui/src/contexts/WebSocketContext.tsx</code></td>
+            <td><code>sendMessage</code> 从 <code>void</code> 改为 <code>boolean</code>。</td>
+            <td>把底层 WebSocket 发送成败显式暴露出来。</td>
+          </tr>
+          <tr>
+            <td><code>ui/src/components/chat/utils/sessionLauncher.ts</code></td>
+            <td><code>startSessionCommand</code> 返回 <code>{ sessionId, sent }</code>。</td>
+            <td>保留原来的 session id 语义，同时把发送结果传回 composer。</td>
+          </tr>
+          <tr>
+            <td><code>ui/src/components/chat/hooks/useChatComposerState.ts</code></td>
+            <td>发送失败时清理 pending 状态、停止 loading、追加错误消息、保留输入。</td>
+            <td>避免 UI 误导用户请求已经进入处理流程。</td>
+          </tr>
+          <tr>
+            <td><code>sessionLauncher.test.ts</code> 和 <code>useChatComposerState.test.ts</code></td>
+            <td>新增发送成功/失败和错误提示文本测试。</td>
+            <td>保证以后不会退回“只写 console”的行为。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>TDD 修复过程</h2>
+      <ol>
+        <li>
+          先写 <code>sessionLauncher.test.ts</code>，要求 <code>startSessionCommand</code>
+          在 <code>sendMessage</code> 返回 <code>false</code> 时返回 <code>{ sent: false }</code>。
+        </li>
+        <li>
+          跑测试，旧实现失败：实际返回的是字符串 <code>"new-session-test"</code>，
+          说明测试确实覆盖了旧行为。
+        </li>
+        <li>
+          修改 <code>sendMessage</code> 和 <code>startSessionCommand</code> 的返回值模型，让测试变绿。
+        </li>
+        <li>
+          再补 composer helper 测试，要求失败消息是 <code>error</code> 类型并包含
+          <code>not connected</code> 和 <code>try again</code>。
+        </li>
+        <li>
+          最后把 composer submit 流程改成：先尝试发送，失败则显示错误并 return，成功才进入乐观状态。
+        </li>
+      </ol>
+
+      <div class="callout good">
+        面试可讲点：这不是“写完再补测试”，而是先让旧行为失败，再用最小实现让测试通过。
+        这个过程能证明测试确实抓住了问题，而不是只覆盖新代码。
+      </div>
+    </section>
+
+    <section>
+      <h2>验证结果</h2>
+      <h3>通过的命令</h3>
+      <pre><code>pnpm --filter pilotdeck-ui test
+pnpm --filter pilotdeck-ui build</code></pre>
+
+      <ul>
+        <li><span class="tag-good">测试通过：</span>13 个测试文件，68 个测试用例。</li>
+        <li><span class="tag-good">构建通过：</span>Vite production build 成功完成。</li>
+      </ul>
+
+      <h3>typecheck 说明</h3>
+      <p>
+        <code>pnpm --filter pilotdeck-ui typecheck</code> 在当前 base branch 上存在大量 React 类型版本冲突，
+        以及已有的 <code>handleCommandInputChange</code> 签名报错。这些并非本 PR 引入。
+        对本次 touched API 进行关键词过滤后，没有发现新的 <code>sendMessage</code> /
+        <code>startSessionCommand</code> 相关类型错误。
+      </p>
+
+      <div class="callout warn">
+        面试时不要说“所有检查都过了”。准确说法是：UI test 和 build 通过；typecheck 被主线已有问题阻塞，已在 PR 中如实说明。
+      </div>
+    </section>
+
+    <section>
+      <h2>技术取舍</h2>
+      <h3>为什么不直接加 toast？</h3>
+      <p>
+        因为 toast 只能解决“看见提示”的表象，不能解决 composer 状态机已经清空输入、进入 loading 的问题。
+        本次修复先把发送成败建模出来，再在 composer 中控制状态流，属于更靠近根因的修复。
+      </p>
+
+      <h3>为什么不让所有调用方都处理失败？</h3>
+      <p>
+        PilotDeck 中 <code>sendMessage</code> 还用于 presence、abort、permission 等场景。
+        让所有调用方一次性改为强制处理会扩大 PR 范围。当前 PR 只处理用户最敏感的聊天提交路径；
+        其他调用方忽略返回值时行为和过去一致。
+      </p>
+
+      <h3>为什么失败时保留输入？</h3>
+      <p>
+        WebSocket 断开通常是临时状态。保留输入能让用户在连接恢复后直接重试，避免用户重新组织问题。
+        同时不进入 Processing 可以避免用户误以为模型已经开始处理。
+      </p>
+    </section>
+
+    <section>
+      <h2>可以写进简历的表述</h2>
+      <div class="callout">
+        参与 OpenBMB/PilotDeck 开源项目，修复 Web UI 在 WebSocket 未连接时发送失败不可见的问题。
+        通过梳理 React composer 状态机与 WebSocket context 的调用链，将底层 <code>sendMessage</code>
+        从无返回值调整为显式返回发送结果，并在聊天提交路径中基于失败结果保留用户输入、停止乐观 loading、
+        展示可见错误提示；补充 Vitest 回归测试并通过 UI test / production build 验证。
+      </div>
+
+      <h3>更技术向的简历 bullet</h3>
+      <ul>
+        <li>
+          修复 PilotDeck Web UI 的 WebSocket send failure UX bug：将底层发送失败从 console-only warning
+          提升为业务可处理结果，避免聊天界面误进入 Processing 状态。
+        </li>
+        <li>
+          梳理 <code>useChatComposerState</code>、<code>startSessionCommand</code>、
+          <code>WebSocketContext</code> 的数据流，以最小 API 变更实现发送结果向上传播。
+        </li>
+        <li>
+          使用 TDD 补充 Vitest 回归测试，覆盖 send success / send failure 和失败提示消息生成逻辑。
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>面试高频问答准备</h2>
+      <div class="qa">
+        <strong>Q：这个 bug 的根因是什么？</strong>
+        A：WebSocket 未连接时，底层 <code>sendMessage</code> 只打印 warning，没有把失败结果返回给调用方。
+        composer 在不知道发送失败的情况下继续执行乐观 UI 更新，导致输入清空、loading 开启，但请求其实没有发出去。
+      </div>
+
+      <div class="qa">
+        <strong>Q：你为什么选择改返回值，而不是直接在 WebSocketContext 里弹提示？</strong>
+        A：因为 WebSocketContext 是底层通信层，它不知道当前消息对应哪个 UI 场景。把结果返回给 composer，
+        可以让真正拥有上下文的地方决定是否保留输入、停止 loading、显示错误消息，职责更清晰。
+      </div>
+
+      <div class="qa">
+        <strong>Q：这个改动会不会破坏其他调用方？</strong>
+        A：兼容性风险较低。JS/TS 里调用方可以忽略返回值；同时 <code>startSessionCommand</code>
+        支持旧式 <code>void</code> sendMessage，只有明确返回 <code>false</code> 才视为失败。
+        也就是说旧调用方行为基本保持不变，chat submit 路径获得了额外的失败处理。
+      </div>
+
+      <div class="qa">
+        <strong>Q：为什么发送失败时不添加用户消息？</strong>
+        A：因为消息没有发到后端，添加用户消息会制造“已经提交”的错觉。更合理的行为是保留输入和草稿，
+        显示连接错误，让用户等重连后重试。
+      </div>
+
+      <div class="qa">
+        <strong>Q：你怎么验证不是 provider 或模型配置问题？</strong>
+        A：当中转平台没有任何请求记录时，说明请求没有到 provider 层。进一步看浏览器控制台和 UI WebSocket 状态，
+        发现发送函数在 socket 未连接时只 warning。由此定位到 UI WebSocket 发送阶段，而不是模型配置阶段。
+      </div>
+
+      <div class="qa">
+        <strong>Q：这次贡献有什么工程价值？</strong>
+        A：它改善了失败可观测性和用户反馈，减少排障误导；同时把通信层失败显式建模为返回值，
+        让上层状态机能做正确分支处理。这比单纯补一个提示更稳。
+      </div>
+    </section>
+
+    <section>
+      <h2>复盘与后续扩展</h2>
+      <p>
+        这次 PR 聚焦最小修复，没有做全局离线状态管理。后续如果继续贡献，可以考虑：
+      </p>
+      <ul>
+        <li>在 app shell 层显示全局 WebSocket 连接状态。</li>
+        <li>给 abort / permission / presence 等调用方逐步增加失败处理。</li>
+        <li>把连接恢复后的重试体验做得更顺滑，例如提供“重新发送”按钮。</li>
+      </ul>
+      <p>
+        但这些都属于下一阶段功能，不适合塞进本次 bugfix PR。小而清晰的 PR 更容易被维护者 review 和合并。
+      </p>
+    </section>
+  </main>
+</body>
+</html>
